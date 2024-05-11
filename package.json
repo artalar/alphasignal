@@ -1,0 +1,33 @@
+{
+  "name": "alphasignal",
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Reactive primitive for all kind of things",
+  "source": "src/index.ts",
+  "module": "./dist/index.module.js",
+  "scripts": {
+    "prepublishOnly": "npm run build",
+    "build": "bun build ./src/index.ts --outdir ./dist --sourcemap=external",
+    "test": "bun test src/index.test.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/artalar/alphasignal.git"
+  },
+  "keywords": [
+    "state",
+    "store",
+    "reactive",
+    "signal"
+  ],
+  "author": "artalar",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/artalar/alphasignal/issues"
+  },
+  "homepage": "https://github.com/artalar/alphasignal#readme",
+  "devDependencies": {
+    "bun": "^1.1.8",
+    "typescript": "^5.4.5"
+  }
+}

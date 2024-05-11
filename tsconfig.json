@@ -1,0 +1,28 @@
+// copied from https://github.com/sindresorhus/tsconfig/blob/main/tsconfig.json
+{
+  "compilerOptions": {
+    // Disabled because of https://github.com/Microsoft/TypeScript/issues/29172
+    // "outDir": "dist",
+
+    "module": "node16",
+    "moduleResolution": "node16",
+    "moduleDetection": "force",
+    "target": "ESNext", // Node.js 18
+    "lib": ["DOM", "ESNext"],
+    "resolveJsonModule": false, // ESM doesn't yet support JSON modules.
+    "declaration": true,
+    "stripInternal": true,
+    "strict": true,
+    "noImplicitReturns": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noEmitOnError": true,
+    "useDefineForClassFields": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  }
+}
