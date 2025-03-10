@@ -1,300 +1,541 @@
-import { AsyncContext, Fn, STACK, Unsubscribe, storeVar, top } from './internal.js'
+import { COLOR } from '../picocolors.ts'
+import type { Fn, Mix, Unsubscribe } from './utils.ts'
+import { assert } from './utils.ts'
 
-export interface Atom<State = any> {
+/** Base atom interface for other userspace implementations */
+export interface AtomLike<State = any> {
   (): State
-  __reatom: string
+
+  /** Extension system */
+  mix: Mix<this>
+
+  subscribe: (cb?: () => any) => Unsubscribe
+
+  /** @internal The type of atom */
+  __reatom: 'atom' | 'action'
+
+  /** @internal The list of applied mixins (middlewares). */
+  __mixins: Array<Fn>
 }
 
-export interface AtomMut<State = any> extends Atom<State> {
+/** Base changeable state container */
+export interface Atom<State = any> extends AtomLike<State> {
   (newState?: State): State
 }
 
+/** Derived state container */
+export interface Computed<State = any> extends AtomLike<State> {
+  (): State
+}
+
+/** Autoclearable array of processed events */
+export interface TemporalArray<T = any> extends Array<T> {}
+
+/** Logic container with atom features */
 export interface Action<Params extends any[] = any[], Payload = any>
-  extends Atom<Array<{ params: Params; payload: Payload }>> {
+  extends AtomLike<TemporalArray<{ params: Params; payload: Payload }>> {
   (...a: Params): Payload
 }
 
-export interface Effect<T = any> extends Atom<Unsubscribe> {
-  (): Unsubscribe
-}
-
+/** Callstack snapshot */
 export interface Frame<State = any> {
   error: null | NonNullable<unknown>
   state: State
-  atom: Atom<State>
-  cause: null | Frame
-  context: null | Map<AsyncContext.Variable, unknown>
-  pubs: Array<Frame>
-  subs: Array<Atom>
+  atom: AtomLike<State>
+  /** Immutable list of dependencies.
+   * The first element is actualization flag and an imperative write cause. */
+  pubs: [actualization: null | Frame, ...dependencies: Array<Frame>]
+  subs: Array<AtomLike>
+  run<I extends any[], O>(fn: (...args: I) => O, ...args: I): O
 }
 
-/** have not nullable context */
-export interface VariableFrame<T = any> extends Frame<T> {
-  context: Map<AsyncContext.Variable, unknown>
+/** Computed's derivations queue */
+export interface Queue extends Array<Fn> {}
+
+/** Atom's state mappings for context */
+export interface Store extends WeakMap<Atom, Frame> {
+  get<T>(target: Atom<T>): undefined | Frame<T>
+  set<T>(target: Atom<T>, frame: Frame<T>): this
 }
 
-export interface Queue extends Array<Frame> {}
-
-export interface RootState extends Queue {}
+export interface RootState {
+  store: Store
+  queue: Queue
+}
 
 export interface RootFrame extends Frame<RootState> {}
 
-export interface RootAtom extends Atom<RootState> {
+export interface RootAtom extends AtomLike<RootState> {
   (): RootFrame
+  start<T>(cb: () => T): T
 }
 
-type Falsy = false | 0 | '' | null | undefined
-// Can't be an arrow function due to
-//    https://github.com/microsoft/TypeScript/issues/34523
-/** Throws `Reatom error: ${message}` */
-export function throwReatomError(
-  condition: any,
-  message: string,
-): asserts condition is Falsy {
-  if (condition) throw new Error(`Reatom error: ${message}`)
+let DEBUG = false
+
+export class ReatomError extends Error {}
+
+function run<I extends any[], O>(
+  this: Frame,
+  fn: (...args: I) => O,
+  ...args: I
+): O {
+  // TODO root check?
+  STACK.push(this)
+  try {
+    return fn(...args)
+  } finally {
+    STACK.pop()
+  }
 }
 
-/** Throws `Reatom error: ${message}` */
-export function throwReatomNullable<T>(
-  condition: T,
-  message: string,
-): asserts condition is NonNullable<T> {
-  throwReatomError(!condition, message)
-}
+let copy = (rootFrame: RootFrame, frame: Frame) => {
+  if (DEBUG) {
+    console.log(COLOR.dimGreen('copy'), frame.atom.name)
+  }
 
-// @ts-expect-error TODO declare globals?
-throwReatomNullable(globalThis.__reatom_root, 'root duplication')
+  let pubs = frame.pubs.slice() as typeof frame.pubs
 
-export let root =
-  // @ts-expect-error TODO declare globals?
-  (globalThis.__reatom_root = () => {
-    let frame = top()
-    while (frame.cause !== null) frame = frame.cause
-    return frame
-  }) as RootAtom
-root.__reatom = 'atom'
+  // let pubs = new Array(frame.pubs.length) as typeof frame.pubs
+  // for (let i = 1; i < frame.pubs.length; i++) {
+  //   pubs[i] = frame.pubs[i]!
+  // }
 
-let copy = (frame: Frame, cause: Frame, store: StoreWeakMap) => {
+  pubs[0] = null
+
   frame = {
     error: frame.error,
     state: frame.state,
     atom: frame.atom,
-    cause,
-    context: frame.context,
-    pubs: frame.pubs,
+    pubs,
     subs: frame.subs,
+    run,
   }
-  store.set(frame.atom, frame)
+  rootFrame.state.store.set(frame.atom, frame)
   return frame
 }
 
-let enqueue = (frame: Frame, store: StoreWeakMap, rootFrame: RootFrame) => {
+let enqueue = (rootFrame: RootFrame, frame: Frame) => {
+  if (DEBUG) {
+    console.log(COLOR.dimGreen('enqueue'), frame.atom.name)
+  }
+
   for (let i = 0; i < frame.subs.length; i++) {
     let sub = frame.subs[i]!
-    let subFrame = store.get(sub)!
-
-    if (subFrame.subs.length !== 0) {
-      subFrame = copy(subFrame, frame, store)
-      if (sub.__reatom === 'effect') {
-        if (rootFrame.state.push(subFrame) === 1) {
-          Promise.resolve().then(wrap(notify, rootFrame))
-        }
-
-        subFrame.subs.length = 0
-      } else {
-        enqueue(subFrame, store, rootFrame)
+    if (frame.atom === sub) {
+      if (rootFrame.state.queue.push(sub) === 1) {
+        Promise.resolve().then(() => notify(rootFrame))
+      }
+    } else {
+      let subFrame = rootFrame.state.store.get(sub)!
+      if (subFrame.pubs[0] !== null) {
+        enqueue(rootFrame, copy(rootFrame, subFrame))
       }
     }
   }
-  // frame.subs = []
-  frame.subs.length = 0
 }
 
-let unlink = (anAtom: Atom, oldPubs: Frame['pubs'], store: StoreWeakMap) => {
-  for (let i = 0; i < oldPubs.length; i++) {
-    // TODO do not unlink pub if it was updated?
+export let schedule = async <T>(fn: (...a: any[]) => T): Promise<T> => {
+  if (DEBUG) {
+    console.log(COLOR.magenta('schedule in'), top().atom.name)
+  }
+
+  let { queue } = root().state
+
+  do await null
+  while (queue.length)
+
+  return fn()
+}
+
+let link = (frame: Frame) => {
+  if (DEBUG) {
+    console.log(COLOR.green('link'), frame.atom.name)
+  }
+
+  for (let i = 1; i < frame.pubs.length; i++) {
+    if (frame.pubs[i]!.subs.push(frame.atom) === 1) {
+      link(frame.pubs[i]!)
+    }
+  }
+}
+
+// The algorithm might look sub-optimal and have extra "complexity",
+// but in the real data, it is in the best case quite often (pub.subs.pop()).
+// For example, as we run `link` before `unlink` during deps invalidation,
+// for deps duplication we want to find just added dep.
+let unlink = (sub: Atom, oldPubs: Frame['pubs']) => {
+  if (DEBUG) {
+    console.log(COLOR.red('unlink'), sub.name)
+  }
+
+  // Start from the end to try to revet the link sequence with just "pop" complexity.
+  // Do not unlink the zero pub, as it is just an actualization flag.
+  for (let i = oldPubs.length - 1; i > 0; i--) {
     let pub = oldPubs[i]!
 
-    let idx = pub.subs.indexOf(anAtom)
+    let idx = pub.subs.lastIndexOf(sub)
 
     // looks like the pub was enqueued
     if (idx === -1) continue
 
-    if (idx === 0) {
+    if (pub.subs.length === 1) {
       pub.subs.length = 0
-      unlink(pub.atom, pub.pubs, store)
+      unlink(pub.atom, pub.pubs)
+    }
+    // This should be the most common case
+    else if (idx === pub.subs.length - 1) {
+      pub.subs.pop()
     } else {
-      // This algorithm might look sub-optimal and have extra complexity,
-      // but in the real data, it is in the best case quite often,
-      // like `pub.subs[pub.subs.indexOf(anAtom)] = pub.subs.pop()`
+      // Search the suitable element (not effect) from the end to reduce the shift (`splice`) complexity.
+      let shiftIdx = pub.subs.findLastIndex((el) => '__reatom' in el)
 
-      // search the suitable element from the end to reduce the shift (`splice`) complexity
-      let shiftIdx = pub.subs.findLastIndex((el) => el.__reatom !== 'effect')
-      // if all other elements are an effects (which order shouldn't be changed)
-      // we will shift the whole list starting from that element.
-      if (shiftIdx === -1) shiftIdx = idx
-      if (shiftIdx !== idx) pub.subs[idx] = pub.subs[shiftIdx]!
+      if (shiftIdx === -1) {
+        console.warn('IS IT OK???')
+        shiftIdx = idx
+      }
+      pub.subs[idx] = pub.subs[shiftIdx]!
       pub.subs.splice(shiftIdx, 1)
     }
   }
 }
 
-// TODO dirty flag makes node disconnected, is it ok?
-export let isConnected = (anAtom: Atom) =>
-  !!storeVar.get().get(anAtom)?.subs.length
-
-// TODO configurable
-export let notify = () => {
-  for (let { atom } of root().state.splice(0)) {
-    if (atom.__reatom === 'effect') atom()
+let relink = (frame: Frame, oldPubs: Frame['pubs']) => {
+  if (oldPubs.length !== frame.pubs.length) {
+    link(frame)
+    unlink(frame.atom, oldPubs)
+  } else {
+    for (let i = 1; i < oldPubs.length; i++) {
+      if (oldPubs[i]!.atom !== frame.pubs[i]!.atom) {
+        link(frame)
+        unlink(frame.atom, oldPubs)
+        break
+      }
+    }
   }
 }
+
+export let isConnected = (anAtom: Atom): boolean =>
+  !!root().state.store.get(anAtom)?.subs.length
 
 let i = 0
 export let named = (name: string | TemplateStringsArray) => `${name}#${++i}`
 
-export let atom: {
-  <T>(computed: (() => T) | ((state?: T) => T), options?: string): Atom<T>
-  <T>(init: T extends Fn ? never : T, options?: string): AtomMut<T>
-} = <T>(init: {} | ((state?: T) => T), name = named`atom`): Atom<T> => {
-  function atom(): T {
-    let topFrame = top()
-    let rootFrame = root()
-    let cause = arguments.length ? topFrame : rootFrame
-    let store = storeVar.get(topFrame)
-    let frame = store.get(atom)
-    // FIXME ASAP doesn't work for nested reading
-    let linking =
-      topFrame.atom !== root &&
-      // topFrame.atom.__reatom !== 'effect' &&
-      !arguments.length
+let castAtom = <T extends AtomLike>(
+  target: Fn,
+  name: string,
+  type: 'atom' | 'action' = 'atom',
+): T => {
+  Reflect.defineProperty(target, 'name', { value: name })
+  ;(target as AtomLike).__reatom = type
+  ;(target as AtomLike).__mixins = []
+  ;(target as AtomLike).subscribe = () => {
+    if (DEBUG) {
+      console.log('subscribe', target.name)
+    }
 
-    if (!frame) {
+    let rootFrame = root()
+
+    target()
+
+    let frame = rootFrame.state.store.get(target as Atom)
+
+    if (frame!.subs.push(target as Atom) === 1) {
+      relink(frame!, [null])
+    }
+
+    return () => {
+      if (DEBUG) {
+        console.log('unsubscribe', target.name)
+      }
+
+      if (!frame) return
+
+      frame.subs.splice(frame.subs.indexOf(target as Atom), 1)
+
+      if (frame.subs.length === 0) {
+        unlink(target as Atom, rootFrame.state.store.get(target as Atom)!.pubs)
+      }
+
+      frame = undefined
+    }
+  }
+
+  return target as T
+}
+
+export let atom: {
+  <T>(computed: (() => T) | ((state?: T) => T), name?: string): Computed<T>
+  <T>(init: T extends Fn ? never : T, name?: string): Atom<T>
+} = <T>(init: {} | ((state?: T) => T), name = named('atom')): Atom<T> => {
+  let atom = castAtom<Atom<T>>(function (): T {
+    let rootFrame = root()
+    let topFrame = top()
+    let push = arguments.length !== 0
+    let frame = rootFrame.state.store.get(atom)
+
+    if (DEBUG) {
+      console.log(push ? COLOR.cyan('enter') : COLOR.yellow('enter'), atom.name)
+    }
+
+    if (frame === undefined) {
       frame = {
         error: null,
         state: (typeof init === 'function' ? undefined : init) as T,
         atom,
-        cause,
-        context: null,
-        pubs: [],
+        pubs: [null],
         subs: [],
+        run,
       }
-      store.set(atom, frame)
-    } else if (
-      arguments.length ||
-      (typeof init === 'function' && frame.pubs.length === 0)
-    ) {
-      frame = copy(frame, cause, store)
+      rootFrame.state.store.set(atom, frame)
     }
+
+    let { error, state, pubs } = frame
+
+    if (push) {
+      frame = copy(rootFrame, frame)
+      frame.pubs[0] = topFrame
+      frame.state = arguments[0]
+      frame.error = null
+    }
+
+    let copied = push || pubs[0] === null
 
     try {
       STACK.push(frame)
-      if (frame.error !== null) throw frame.error
 
-      if (!frame.subs.length || arguments.length) {
-        let { error, state, pubs } = frame
-        if (typeof init === 'function') {
-          frame.pubs = []
-          if (
-            pubs.length === 0 ||
-            pubs.some(({ atom, state }) => !Object.is(state, atom()))
-          ) {
-            frame.pubs = []
-            // FIXME
-            frame.state = init(state)
-            frame.error = null
+      if (
+        typeof init === 'function' &&
+        (frame.pubs[0] === null || !frame.subs.length)
+      ) {
+        let shouldUpdate = pubs.length === 1
+        if (!shouldUpdate) {
+          pubs = frame.pubs
+          frame.pubs = [null]
+          try {
+            for (let i = 1; i < pubs.length; i++) {
+              let { error, state, atom } = pubs[i]!
 
-            if (pubs.length !== frame.pubs.length) {
-              unlink(atom, pubs, store)
-            } else {
-              // TODO move to a child, schedule before notifications queue
-              for (let i = 0; i < pubs.length; i++) {
-                if (pubs[i]!.atom !== frame.pubs[i]!.atom) {
-                  unlink(atom, pubs, store)
-                  break
-                }
+              let pubFrame = rootFrame.state.store.get(atom)!
+              let isFresh =
+                pubFrame.subs.length &&
+                pubFrame.pubs[0] !== null &&
+                !pubFrame.error
+
+              if (isFresh) {
+                frame.pubs.push(pubFrame)
+              }
+
+              if (
+                !Object.is(state, isFresh ? pubFrame.state : atom()) ||
+                error
+              ) {
+                shouldUpdate = true
+                break
               }
             }
-          } else {
+          } finally {
             frame.pubs = pubs
           }
         }
 
-        if (arguments.length !== 0) {
-          frame.state = arguments[0]
-        }
+        if (shouldUpdate) {
+          // TODO there are extra invalidations in diamond case
+          if (!copied) {
+            STACK[STACK.length - 1] = frame = copy(rootFrame, frame)
+          }
 
-        if (
-          frame.atom.__reatom !== 'effect' &&
-          frame.subs.length > 0 &&
-          (!Object.is(state, frame.state) || error != null)
-        ) {
-          enqueue(frame, store, rootFrame)
+          frame.pubs = [null]
+          frame.state = init(frame.state)
+          frame.error = null
+
+          if (frame.subs.length) {
+            relink(frame, pubs)
+          }
         }
       }
     } catch (error) {
-      throw (frame.error = error ?? new Error('Unknown error'))
+      frame.error = error ?? new ReatomError('Unknown error')
     } finally {
-      if (linking) {
+      frame.pubs[0] ??= push ? topFrame : rootFrame
+
+      // if the puller is an action it will cleanup itself by itself
+      if (!push && topFrame !== rootFrame) {
+        if (DEBUG && topFrame.atom === frame.atom) {
+          console.log(COLOR.bgRed('topFrame.atom === frame.atom'))
+        }
         topFrame.pubs.push(frame)
-        frame.subs.push(topFrame.atom)
       }
+
+      if (
+        frame.subs.length !== 0 &&
+        pubs[0] !== null &&
+        (!Object.is(state, frame.state) || error !== frame.error)
+      ) {
+        enqueue(rootFrame, frame)
+      }
+
       STACK.pop()
     }
 
-    return frame.state
-  }
+    if (frame.error) {
+      throw frame.error
+    }
 
-  Reflect.defineProperty(atom, 'name', { value: name })
+    return frame.state
+  }, name)
+
   if (typeof init === 'function') {
     Reflect.defineProperty(init, 'name', { value: `${name}.function` })
   }
 
-  atom.__reatom = 'atom'
-
   return atom
 }
 
+// TODO support generics
 export let action = <Params extends any[] = any[], Payload = any>(
   cb: (...params: Params) => Payload,
-  name = named`action`,
+  name = named('action'),
 ): Action<Params, Payload> => {
-  let params: undefined | Params
-  let action = atom(() => {
+  // let params: Params
+  // let action = atom(
+  //   (state: Array<{ params: Params; payload: Payload }> = []) => {
+  //     try {
+  //       return [...state, { params, payload: cb(...params) }]
+  //     } finally {
+  //       // @ts-expect-error
+  //       params = undefined
+  //       top().pubs.length = 0
+  //     }
+  //   },
+  //   name,
+  // )
+  // // action.__mixins.push((next, ...a) => {
+  // //   params = a
+  // //   let state = next()
+  // //   return state[state.length - 1].payload
+  // // })
+
+  let action = atom((state: any[] = []): any => {
     try {
-      return cb(...params!)
+      var payload = cb(...(state as any))
+      return payload
     } finally {
-      params = undefined
-      top().pubs.length = 0
+      top().pubs.length = 1
     }
   }, name)
   // @ts-expect-error
   return (...a: Params) => action((params = a))
 }
 
-export let effect = (fn: Fn, name = named`effect`): Effect => {
-  let effect = atom(() => {
-    fn()
-    let frame = top()
-    frame.subs.push(effect)
+// /** https://github.com/tc39/proposal-async-context?tab=readme-ov-file#asynccontextvariable */
+// /** Variable of async context - process specific state, coupled with callstack frame */
+// export interface Framevar<T = any> extends AtomLike<T> {
+//   (frame?: Frame): T
 
-    return () => {
-      let store = storeVar.get(frame)
-      let freshFrame = store.get(effect)!
-      freshFrame.subs = []
-      unlink(effect, freshFrame.pubs, store)
+//   run<I extends any[], O>(value: T, fn: (...args: I) => O, ...args: I): O
+// }
+
+export let root = castAtom<RootAtom>(() => {
+  let rootFrame = STACK[0] as RootFrame
+  if (rootFrame?.atom !== root) {
+    throw new ReatomError('broken async stack')
+  }
+  return rootFrame
+}, 'root')
+root.start = (cb) =>
+  ((
+    {
+      error: null,
+      state: { store: new WeakMap() as Store, queue: [] },
+      atom: root,
+      pubs: [null],
+      subs: [],
+      run,
+    } satisfies RootFrame
+  ).run(cb))
+// @ts-expect-error TODO declare globals?
+assert(!globalThis.__reatom_root, 'root duplication', ReatomError)
+// @ts-expect-error TODO declare globals?
+globalThis.__reatom_root = root
+
+// export let findFrame = <T>(
+//   target: AtomLike<T>,
+//   frame = top(),
+// ): Frame<T> | null => {
+//   while (frame !== null && frame.atom !== target) frame = frame.pubs[0]!
+//   return frame
+// }
+
+// TODO configurable
+export let notify = (rootFrame = root()) =>
+  rootFrame.run(() => {
+    if (DEBUG) {
+      console.log('notify')
     }
-  }, name)
-  effect.__reatom = 'effect'
-  return effect
+    let {
+      state: { queue },
+    } = rootFrame
+    for (let cb of queue.splice(0)) {
+      // FIXME scoped counter
+      cb()
+    }
+  })
+
+export let peek = <T>(cb: () => T): T => root().run(cb)
+
+export let STACK: Array<Frame> = []
+
+STACK.push(root.start(() => root()))
+
+export function clearStack() {
+  STACK.length = 0
 }
 
-export interface StoreWeakMap extends WeakMap<Atom, Frame> {
-  get<T>(target: Atom<T>): undefined | Frame<T>
-  set<T>(target: Atom<T>, frame: Frame<T>): this
+export let top = (): Frame => {
+  if (STACK.length === 0) {
+    throw new ReatomError('missing async stack')
+  }
+  return STACK[STACK.length - 1]!
 }
 
-export let read = <T>(cb: () => T): T =>
-  new AsyncContext.Snapshot(root()).run(cb)
+export function wrap<T extends Promise<any> | Fn>(target: T, frame = top()): T {
+  let rootFrame = root()
 
-export let { wrap } = AsyncContext.Snapshot
+  if (typeof target === 'function') {
+    return ((...args: any) => {
+      assert(
+        STACK.length === 0 || STACK[0] === rootFrame,
+        'root collision',
+        ReatomError,
+      )
+
+      STACK.push(rootFrame, frame)
+      try {
+        return target(...args)
+      } finally {
+        STACK.length -= 2
+      }
+    }) as T
+  }
+
+  assert(target instanceof Promise, 'target should be promise', ReatomError)
+
+  return new Promise(async (resolve, reject) => {
+    try {
+      let value = await target
+      var seal = () => resolve(value)
+    } catch (error) {
+      seal = () => reject(error)
+    }
+    Promise.resolve().then(() => {
+      assert(
+        STACK.length === 0 || STACK[0] === rootFrame,
+        'root collision',
+        ReatomError,
+      )
+      STACK.push(rootFrame, frame)
+    })
+    seal()
+    Promise.resolve().then(() => (STACK.length -= 2))
+  }) as T
+}

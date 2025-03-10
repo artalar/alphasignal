@@ -1,3 +1,5 @@
+import { SetTimeout } from './setTimeout.js'
+
 export interface Fn {
   (...a: any[]): any
 }
@@ -28,6 +30,28 @@ export type Plain<Intersection> = Intersection extends (
     }
   : Intersection
 
+export type Shallow<T> = {
+  [K in keyof T]: T[K]
+} & {}
+
+export interface Mix<This> {
+  /* prettier-ignore */ <T>(extension: T): This & Shallow<T>
+  /* prettier-ignore */ <T1>(operator1: (target: This) => T1): This & Shallow<T1>
+  /* prettier-ignore */ <T1, T2>(operator1: (target: This) => T1, operator2: (target: This & T1) => T2): This & Shallow<T1 & T2>
+  /* prettier-ignore */ <T1, T2, T3>(operator1: (target: This) => T1, operator2: (target: This & T1) => T2, operator3: (target: This & T1 & T2) => T3): This & Shallow<T1 & T2 & T3>
+  /* prettier-ignore */ <T1, T2, T3, T4>(operator1: (target: This) => T1, operator2: (target: This & T1) => T2, operator3: (target: This & T1 & T2) => T3, operator4: (target: This & T1 & T2 & T3) => T4): This & Shallow<T1 & T2 & T3 & T4>
+  /* prettier-ignore */ <T1, T2, T3, T4, T5>(operator1: (target: This) => T1, operator2: (target: This & T1) => T2, operator3: (target: This & T1 & T2) => T3, operator4: (target: This & T1 & T2 & T3) => T4, operator5: (target: This & T1 & T2 & T3 & T4) => T5): This & Shallow<T1 & T2 & T3 & T4 & T5>
+  /* prettier-ignore */ <T1, T2, T3, T4, T5, T6>(operator1: (target: This) => T1, operator2: (target: This & T1) => T2, operator3: (target: This & T1 & T2) => T3, operator4: (target: This & T1 & T2 & T3) => T4, operator5: (target: This & T1 & T2 & T3 & T4) => T5, operator6: (target: This & T1 & T2 & T3 & T4 & T5) => T6): This & Shallow<T1 & T2 & T3 & T4 & T5 & T6>
+  /* prettier-ignore */ <T1, T2, T3, T4, T5, T6, T7>(operator1: (target: This) => T1, operator2: (target: This & T1) => T2, operator3: (target: This & T1 & T2) => T3, operator4: (target: This & T1 & T2 & T3) => T4, operator5: (target: This & T1 & T2 & T3 & T4) => T5, operator6: (target: This & T1 & T2 & T3 & T4 & T5) => T6, operator7: (target: This & T1 & T2 & T3 & T4 & T5 & T6) => T7): This & Shallow<T1 & T2 & T3 & T4 & T5 & T6 & T7>
+  /* prettier-ignore */ <T1, T2, T3, T4, T5, T6, T7, T8>(operator1: (target: This) => T1, operator2: (target: This & T1) => T2, operator3: (target: This & T1 & T2) => T3, operator4: (target: This & T1 & T2 & T3) => T4, operator5: (target: This & T1 & T2 & T3 & T4) => T5, operator6: (target: This & T1 & T2 & T3 & T4 & T5) => T6, operator7: (target: This & T1 & T2 & T3 & T4 & T5 & T6) => T7, operator8: (target: This & T1 & T2 & T3 & T4 & T5 & T6 & T7) => T8): This & Shallow<T1 & T2 & T3 & T4 & T5 & T6 & T7 & T8>
+  /* prettier-ignore */ <T1, T2, T3, T4, T5, T6, T7, T8, T9>(operator1: (target: This) => T1, operator2: (target: This & T1) => T2, operator3: (target: This & T1 & T2) => T3, operator4: (target: This & T1 & T2 & T3) => T4, operator5: (target: This & T1 & T2 & T3 & T4) => T5, operator6: (target: This & T1 & T2 & T3 & T4 & T5) => T6, operator7: (target: This & T1 & T2 & T3 & T4 & T5 & T6) => T7, operator8: (target: This & T1 & T2 & T3 & T4 & T5 & T6 & T7) => T8, operator9: (target: This & T1 & T2 & T3 & T4 & T5 & T6 & T7 & T8) => T9): This & Shallow<T1 & T2 & T3 & T4 & T5 & T6 & T7 & T8 & T9>
+  /* prettier-ignore */ <T1, T2, T3, T4, T5, T6, T7, T8, T9, T10>(operator1: (target: This) => T1, operator2: (target: This & T1) => T2, operator3: (target: This & T1 & T2) => T3, operator4: (target: This & T1 & T2 & T3) => T4, operator5: (target: This & T1 & T2 & T3 & T4) => T5, operator6: (target: This & T1 & T2 & T3 & T4 & T5) => T6, operator7: (target: This & T1 & T2 & T3 & T4 & T5 & T6) => T7, operator8: (target: This & T1 & T2 & T3 & T4 & T5 & T6 & T7) => T8, operator9: (target: This & T1 & T2 & T3 & T4 & T5 & T6 & T7 & T8) => T9, operator10: (target: This & T1 & T2 & T3 & T4 & T5 & T6 & T7 & T8 & T9) => T10): This & Shallow<T1 & T2 & T3 & T4 & T5 & T6 & T7 & T8 & T9 & T10>
+}
+
+export interface Newable<ReturnType> {
+  new (...args: any[]): ReturnType;
+}
+
 export type Values<T> = T[keyof T]
 
 export type OmitValuesKeys<T, V> = Values<{
@@ -42,6 +66,15 @@ export type PickValuesKeys<T, V> = Values<{
 }>
 export type PickValues<T, V> = {
   [K in PickValuesKeys<T, V>]: T[K]
+}
+
+/** Throws `Error(message)` if `value` is falsy */
+export function assert(
+  value: unknown,
+  message: string,
+  ErrorConstructor: Newable<Error> = Error,
+): asserts value {
+  if (!value) throw new ErrorConstructor(message)
 }
 
 export const noop: (...a: any[]) => any = () => {}
@@ -139,12 +172,12 @@ export type Assign<T1, T2, T3 = {}, T4 = {}> = Plain<
 
 /** `Object.assign` with fixed types, equal properties replaced instead of changed to a union */
 export const assign: {
-  <T1, T2, T3 = {}, T4 = {}>(
-    a1: T1,
-    a2: T2,
-    a3?: T3,
-    a4?: T4,
-  ): Assign<T1, T2, T3, T4>
+  <T1, T2, T3 = {}, T4 = {}>(a1: T1, a2: T2, a3?: T3, a4?: T4): Assign<
+    T1,
+    T2,
+    T3,
+    T4
+  >
 } = Object.assign
 
 /** `Object.assign` which set an empty object to the first argument */
@@ -186,9 +219,19 @@ export const omit = <T, K extends keyof T>(
  */
 export const jsonClone = <T>(value: T): T => JSON.parse(JSON.stringify(value))
 
-/** Get random integer. Parameters should be integers too. */
-export const random = (min = 0, max = Number.MAX_SAFE_INTEGER - 1) =>
+let _random = (min = 0, max = Number.MAX_SAFE_INTEGER - 1) =>
   Math.floor(Math.random() * (max - min + 1)) + min
+/** Get random integer. Parameters should be integers too. */
+export const random: typeof _random = (min, max) => _random(min, max)
+
+/** Pass a callback to replace the exported random function. Returned function restores the original random behavior. */
+export const mockRandom = (fn: typeof random) => {
+  const origin = _random
+  _random = fn
+  return () => {
+    _random = origin
+  }
+}
 
 /**
  * Asserts that the value is not `null` or `undefined`.
@@ -201,6 +244,7 @@ export const nonNullable = <T>(value: T, message?: string): NonNullable<T> => {
 }
 
 const { toString } = Object.prototype
+const { toString: toStringArray } = []
 const visited = new WeakMap<{}, string>()
 /** Stringify any kind of data with some sort of stability.
  * Support: an object keys sorting, `Map`, `Set`, circular references, custom classes, functions and symbols.
@@ -208,39 +252,54 @@ const visited = new WeakMap<{}, string>()
  */
 export const toStringKey = (thing: any, immutable = true): string => {
   var tag = typeof thing
-  var isNominal = tag === 'function' || tag === 'symbol'
+
+  if (tag === 'symbol') return `[reatom Symbol]${thing.description || 'symbol'}`
 
   if (
-    !isNominal &&
+    tag !== 'function' &&
     (tag !== 'object' ||
       thing === null ||
       thing instanceof Date ||
       thing instanceof RegExp)
   ) {
-    return tag + thing
+    return `[reatom ${tag}]` + thing
   }
 
   if (visited.has(thing)) return visited.get(thing)!
 
+  var name =
+    Reflect.getPrototypeOf(thing)?.constructor.name ||
+    toString.call(thing).slice(8, -1)
   // get a unique prefix for each type to separate same array / map
-  var result = toString.call(thing)
-  var unique = result + random()
   // thing could be a circular or not stringifiable object from a userspace
-  visited.set(thing, unique)
+  var result = `[reatom ${name}#${random()}]`
+  if (tag === 'function') {
+    visited.set(thing, (result += thing.name))
+    return result
+  }
+  visited.set(thing, result)
 
+  var proto = Reflect.getPrototypeOf(thing)
   if (
-    isNominal ||
-    (thing.constructor !== Object && Symbol.iterator in thing === false)
+    proto &&
+    Reflect.getPrototypeOf(proto) &&
+    thing.toString !== toStringArray &&
+    Symbol.iterator in thing === false
   ) {
-    return unique
+    return result
   }
 
-  for (let item of Symbol.iterator in thing
-    ? thing
-    : Object.entries(thing).sort(([a], [b]) => a.localeCompare(b)))
-    result += toStringKey(item, immutable)
+  var iterator =
+    Symbol.iterator in thing
+      ? thing
+      : Object.entries(thing).sort(([a], [b]) => a.localeCompare(b))
+  for (let item of iterator) result += toStringKey(item, immutable)
 
-  immutable ? visited.set(thing, result) : visited.delete(thing)
+  if (immutable) {
+    visited.set(thing, result)
+  } else {
+    visited.delete(thing)
+  }
 
   return result
 }
@@ -249,6 +308,7 @@ export interface AbortError extends DOMException {
   name: 'AbortError'
 }
 
+let i = 0
 export const toAbortError = (reason: any): AbortError => {
   if (reason instanceof Error === false || reason.name !== 'AbortError') {
     if (reason instanceof Error) {
@@ -257,6 +317,8 @@ export const toAbortError = (reason: any): AbortError => {
     } else {
       reason = isObject(reason) ? toString.call(reason) : String(reason)
     }
+
+    reason += ` [${++i}]`
 
     if (typeof DOMException === 'undefined') {
       reason = new Error(reason, options)
@@ -286,6 +348,20 @@ export const throwAbort = (
   controller?.abort(error)
   throw error
 }
+
+export const setTimeout: SetTimeout = Object.assign(
+  (...a: Parameters<SetTimeout>) => {
+    const intervalId = globalThis.setTimeout(...a)
+    return typeof intervalId === 'number'
+      ? intervalId
+      : Object.assign(intervalId, {
+          toJSON() {
+            return -1
+          },
+        })
+  },
+  globalThis.setTimeout,
+)
 
 /** @link https://developer.mozilla.org/en-US/docs/Web/API/setTimeout#maximum_delay_value */
 export const MAX_SAFE_TIMEOUT = 2 ** 31 - 1

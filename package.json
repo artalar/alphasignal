@@ -1,33 +1,58 @@
 {
-  "name": "alphasignal",
-  "version": "0.0.0",
-  "type": "module",
-  "description": "Reactive primitive for all kind of things",
+  "name": "reatom",
+  "version": "0.0.1",
+  "private": false,
+  "description": "The ultimate state manager",
   "source": "src/index.ts",
-  "module": "./dist/index.module.js",
-  "scripts": {
-    "prepublishOnly": "npm run build",
-    "build": "bun build ./src/index.ts --outdir ./dist --sourcemap=external",
-    "test": "bun test src/index.test.ts"
+  "exports": {
+    "types": "./build/index.d.ts",
+    "require": "./build/index.js",
+    "default": "./build/index.mjs"
   },
+  "main": "build/index.js",
+  "module": "build/index.mjs",
+  "types": "build/index.d.ts",
+  "sideEffects": false,
+  "browserslist": [
+    "last 2 Chrome versions"
+  ],
+  "minify": {
+    "mangle": false
+  },
+  "scripts": {
+    "prepublishOnly": "npm run build && npm run test",
+    "build": "microbundle -f esm,cjs --raw=true",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "author": "artalar",
+  "contributors": [
+    {
+      "name": "artalar",
+      "url": "https://github.com/artalar"
+    }
+  ],
+  "license": "MIT",
+  "readme": "README.md",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/artalar/alphasignal.git"
+    "url": "git+ssh://git@github.com/artalar/reatom.git"
   },
+  "bugs": {
+    "url": "https://github.com/artalar/reatom/issues"
+  },
+  "homepage": "https://www.reatom.dev/",
   "keywords": [
     "state",
     "store",
+    "flux",
+    "atom",
     "reactive",
-    "signal"
+    "reactivity",
+    "state-manager",
+    "reatom"
   ],
-  "author": "artalar",
-  "license": "MIT",
-  "bugs": {
-    "url": "https://github.com/artalar/alphasignal/issues"
-  },
-  "homepage": "https://github.com/artalar/alphasignal#readme",
-  "devDependencies": {
-    "bun": "^1.1.8",
-    "typescript": "^5.4.5"
-  }
+  "files": [
+    "/build"
+  ]
 }

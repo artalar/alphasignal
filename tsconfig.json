@@ -4,9 +4,8 @@
     // Disabled because of https://github.com/Microsoft/TypeScript/issues/29172
     // "outDir": "dist",
 
-    "module": "node16",
-    "moduleResolution": "node16",
-    "moduleDetection": "force",
+    "module": "NodeNext",
+    "moduleResolution": "nodenext",
     "target": "ESNext", // Node.js 18
     "lib": ["DOM", "ESNext"],
     "resolveJsonModule": false, // ESM doesn't yet support JSON modules.
@@ -23,6 +22,7 @@
     "noEmitOnError": true,
     "useDefineForClassFields": true,
     "forceConsistentCasingInFileNames": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "rewriteRelativeImportExtensions": true
   }
 }
