@@ -266,12 +266,13 @@ let castAtom = <T extends AtomLike>(
 export let atom: {
   <T>(computed: (() => T) | ((state?: T) => T), name?: string): Computed<T>
   <T>(init: T extends Fn ? never : T, name?: string): Atom<T>
-} = <T>(init: {} | ((state?: T) => T), name = named('atom')): Atom<T> => {
+} = <T>(setup: {} | ((state?: T) => T), name = named('atom')): Atom<T> => {
   let atom = castAtom<Atom<T>>(function (): T {
     let rootFrame = root()
     let topFrame = top()
     let push = arguments.length !== 0
     let frame = rootFrame.state.store.get(atom)
+    let init = frame === undefined
 
     if (DEBUG) {
       console.log(push ? COLOR.cyan('enter') : COLOR.yellow('enter'), atom.name)
@@ -280,7 +281,7 @@ export let atom: {
     if (frame === undefined) {
       frame = {
         error: null,
-        state: (typeof init === 'function' ? undefined : init) as T,
+        state: (typeof setup === 'function' ? undefined : setup) as T,
         atom,
         pubs: [null],
         subs: [],
@@ -304,10 +305,10 @@ export let atom: {
       STACK.push(frame)
 
       if (
-        typeof init === 'function' &&
+        typeof setup === 'function' &&
         (frame.pubs[0] === null || !frame.subs.length)
       ) {
-        let shouldUpdate = pubs.length === 1
+        let shouldUpdate = init || push
         if (!shouldUpdate) {
           pubs = frame.pubs
           frame.pubs = [null]
@@ -345,7 +346,7 @@ export let atom: {
           }
 
           frame.pubs = [null]
-          frame.state = init(frame.state)
+          frame.state = setup(frame.state)
           frame.error = null
 
           if (frame.subs.length) {
@@ -368,6 +369,7 @@ export let atom: {
 
       if (
         frame.subs.length !== 0 &&
+        // TODO wat?
         pubs[0] !== null &&
         (!Object.is(state, frame.state) || error !== frame.error)
       ) {
@@ -384,8 +386,8 @@ export let atom: {
     return frame.state
   }, name)
 
-  if (typeof init === 'function') {
-    Reflect.defineProperty(init, 'name', { value: `${name}.function` })
+  if (typeof setup === 'function') {
+    Reflect.defineProperty(setup, 'name', { value: `${name}.function` })
   }
 
   return atom

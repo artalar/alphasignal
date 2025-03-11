@@ -59,7 +59,7 @@ test('linking', () => {
   expect(testEffectFrame.subs.length).toBe(0)
 })
 
-test('should not drop frame stack after await', async () => {
+test('async frame stack', async () => {
   const name = 'asyncLoop'
 
   let getStackTrace = (acc = '', frame = top()): string => {
@@ -283,6 +283,19 @@ test('conditional deps duplication', () => {
   unsub()
   expect(isConnected(dep1)).toBe(false)
   expect(isConnected(dep2)).toBe(false)
+})
+
+test('computed without dependencies', () => {
+  const name = 'noDeps'
+  const a = atom((state = 0) => {
+    return state + 1
+  }, `${name}.a`)
+
+  expect(a()).toBe(1)
+  expect(a()).toBe(1)
+  // TODO remove ability to write a computed (replace with Atom + withComputed)
+  // @ts-ignore
+  expect(a(10)).toBe(11)
 })
 
 // test.skip('action', () => {
