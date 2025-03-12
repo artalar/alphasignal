@@ -1,6 +1,51 @@
 import { COLOR } from '../picocolors.ts'
-import type { Fn, Mix, Unsubscribe } from './utils.ts'
+import type { Fn, Rec, Shallow, Unsubscribe } from './utils.ts'
 import { assert } from './utils.ts'
+
+declare const UNDEFINED: unique symbol
+type UNDEFINED = typeof UNDEFINED
+
+export interface Assigner<Target extends AtomLike, Result extends Rec> {
+  <T extends Target>(target: T): Result
+}
+export type AssignerBind<T> = T extends AtomLike
+  ? T
+  : T extends (...params: infer Params) => infer Payload
+  ? Action<Params, Payload>
+  : T
+
+export interface Middleware<
+  Target extends AtomLike,
+  Params extends any[] | UNDEFINED = UNDEFINED,
+  Result extends unknown | UNDEFINED = UNDEFINED,
+> {
+  <T extends Target>(target: T): (
+    next: (...params: Parameters<T>) => ReturnType<T>,
+    ...params: Params extends UNDEFINED ? Parameters<T> : Params
+  ) => Result extends UNDEFINED ? ReturnType<T> : Result
+}
+
+type Operator<
+  Target extends AtomLike = AtomLike,
+  T extends
+    | Assigner<Target, Rec>
+    | Middleware<Target, any[], unknown> = () => {},
+> = T extends Assigner<Target, infer Result>
+  ? Target & { [K in keyof Result]: AssignerBind<Result[K]> }
+  : T extends (
+      target: Target,
+    ) => (next: any, ...params: infer Params) => infer Result
+  ? [Params, Result] extends [Parameters<Target>, ReturnType<Target>]
+    ? Target
+    : AtomLike<Result> & { (...params: Params): Result } & {
+        [K in Exclude<keyof Target, keyof AtomLike>]: Target[K]
+      }
+  : never
+
+export interface Mix<Target extends AtomLike> {
+  /* prettier-ignore */ <T1 extends Assigner<Target, Rec> | Middleware<Target, any[], any>>(operator1: T1): Operator<Target, T1>
+  // /* prettier-ignore */ <T1>(operator1: (target: This) => T1): This & T1
+}
 
 /** Base atom interface for other userspace implementations */
 export interface AtomLike<State = any> {
@@ -11,11 +56,8 @@ export interface AtomLike<State = any> {
 
   subscribe: (cb?: () => any) => Unsubscribe
 
-  /** @internal The type of atom */
-  __reatom: 'atom' | 'action'
-
   /** @internal The list of applied mixins (middlewares). */
-  __mixins: Array<Fn>
+  __reatom: Array<Fn>
 }
 
 /** Base changeable state container */
@@ -226,8 +268,7 @@ let castAtom = <T extends AtomLike>(
   type: 'atom' | 'action' = 'atom',
 ): T => {
   Reflect.defineProperty(target, 'name', { value: name })
-  ;(target as AtomLike).__reatom = type
-  ;(target as AtomLike).__mixins = []
+  ;(target as AtomLike).__reatom = []
   ;(target as AtomLike).subscribe = () => {
     if (DEBUG) {
       console.log('subscribe', target.name)
@@ -411,7 +452,7 @@ export let action = <Params extends any[] = any[], Payload = any>(
   //   },
   //   name,
   // )
-  // // action.__mixins.push((next, ...a) => {
+  // // action.__reatom.push((next, ...a) => {
   // //   params = a
   // //   let state = next()
   // //   return state[state.length - 1].payload
@@ -541,3 +582,49 @@ export function wrap<T extends Promise<any> | Fn>(target: T, frame = top()): T {
     Promise.resolve().then(() => (STACK.length -= 2))
   }) as T
 }
+
+/* Bind */
+const test0 =
+//    ^?
+  atom(0).mix((target) => ({
+    inc: (to: number = 1) => target(target() + to),
+  }))
+
+test0.inc
+//    ^?
+
+const test0_2 = test0.inc()
+//    ^?
+
+/* Extension test */
+const withAsyncData =
+  <T>(initState: T): Assigner<AtomLike<Promise<T>>, { data: Atom<T> }> =>
+  (target) => {
+    const data = atom((state = initState) => {
+      target().then(data)
+      return state
+    }, `${target.name}.data`) as AtomLike as Atom<T>
+    return { data }
+  }
+const test2 = atom(async () => 42).mix(withAsyncData(0))
+//    ^?
+const test2_1 = test2()
+//    ^?
+const test2_2 = test2.data()
+//    ^?
+
+/* Middleware test */
+const withToString =
+  <T>(): Middleware<Atom<string>, [value: T]> =>
+  () =>
+  (next: Fn, value) =>
+    next(String(value))
+
+const test1 = atom('').mix(withToString<number>())
+//    ^?
+const test1_1 = test1()
+const test1_2 = test1(1)
+// @ts-expect-error
+const test1_3 = test1(1n)
+// @ts-expect-error
+const test1_4 = test1('1')

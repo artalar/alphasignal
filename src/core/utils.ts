@@ -4,6 +4,8 @@ export interface Fn {
   (...a: any[]): any
 }
 
+export type Rec<T = any> = Record<string, T>
+
 export interface Unsubscribe {
   (): void
 }
@@ -33,20 +35,6 @@ export type Plain<Intersection> = Intersection extends (
 export type Shallow<T> = {
   [K in keyof T]: T[K]
 } & {}
-
-export interface Mix<This> {
-  /* prettier-ignore */ <T>(extension: T): This & Shallow<T>
-  /* prettier-ignore */ <T1>(operator1: (target: This) => T1): This & Shallow<T1>
-  /* prettier-ignore */ <T1, T2>(operator1: (target: This) => T1, operator2: (target: This & T1) => T2): This & Shallow<T1 & T2>
-  /* prettier-ignore */ <T1, T2, T3>(operator1: (target: This) => T1, operator2: (target: This & T1) => T2, operator3: (target: This & T1 & T2) => T3): This & Shallow<T1 & T2 & T3>
-  /* prettier-ignore */ <T1, T2, T3, T4>(operator1: (target: This) => T1, operator2: (target: This & T1) => T2, operator3: (target: This & T1 & T2) => T3, operator4: (target: This & T1 & T2 & T3) => T4): This & Shallow<T1 & T2 & T3 & T4>
-  /* prettier-ignore */ <T1, T2, T3, T4, T5>(operator1: (target: This) => T1, operator2: (target: This & T1) => T2, operator3: (target: This & T1 & T2) => T3, operator4: (target: This & T1 & T2 & T3) => T4, operator5: (target: This & T1 & T2 & T3 & T4) => T5): This & Shallow<T1 & T2 & T3 & T4 & T5>
-  /* prettier-ignore */ <T1, T2, T3, T4, T5, T6>(operator1: (target: This) => T1, operator2: (target: This & T1) => T2, operator3: (target: This & T1 & T2) => T3, operator4: (target: This & T1 & T2 & T3) => T4, operator5: (target: This & T1 & T2 & T3 & T4) => T5, operator6: (target: This & T1 & T2 & T3 & T4 & T5) => T6): This & Shallow<T1 & T2 & T3 & T4 & T5 & T6>
-  /* prettier-ignore */ <T1, T2, T3, T4, T5, T6, T7>(operator1: (target: This) => T1, operator2: (target: This & T1) => T2, operator3: (target: This & T1 & T2) => T3, operator4: (target: This & T1 & T2 & T3) => T4, operator5: (target: This & T1 & T2 & T3 & T4) => T5, operator6: (target: This & T1 & T2 & T3 & T4 & T5) => T6, operator7: (target: This & T1 & T2 & T3 & T4 & T5 & T6) => T7): This & Shallow<T1 & T2 & T3 & T4 & T5 & T6 & T7>
-  /* prettier-ignore */ <T1, T2, T3, T4, T5, T6, T7, T8>(operator1: (target: This) => T1, operator2: (target: This & T1) => T2, operator3: (target: This & T1 & T2) => T3, operator4: (target: This & T1 & T2 & T3) => T4, operator5: (target: This & T1 & T2 & T3 & T4) => T5, operator6: (target: This & T1 & T2 & T3 & T4 & T5) => T6, operator7: (target: This & T1 & T2 & T3 & T4 & T5 & T6) => T7, operator8: (target: This & T1 & T2 & T3 & T4 & T5 & T6 & T7) => T8): This & Shallow<T1 & T2 & T3 & T4 & T5 & T6 & T7 & T8>
-  /* prettier-ignore */ <T1, T2, T3, T4, T5, T6, T7, T8, T9>(operator1: (target: This) => T1, operator2: (target: This & T1) => T2, operator3: (target: This & T1 & T2) => T3, operator4: (target: This & T1 & T2 & T3) => T4, operator5: (target: This & T1 & T2 & T3 & T4) => T5, operator6: (target: This & T1 & T2 & T3 & T4 & T5) => T6, operator7: (target: This & T1 & T2 & T3 & T4 & T5 & T6) => T7, operator8: (target: This & T1 & T2 & T3 & T4 & T5 & T6 & T7) => T8, operator9: (target: This & T1 & T2 & T3 & T4 & T5 & T6 & T7 & T8) => T9): This & Shallow<T1 & T2 & T3 & T4 & T5 & T6 & T7 & T8 & T9>
-  /* prettier-ignore */ <T1, T2, T3, T4, T5, T6, T7, T8, T9, T10>(operator1: (target: This) => T1, operator2: (target: This & T1) => T2, operator3: (target: This & T1 & T2) => T3, operator4: (target: This & T1 & T2 & T3) => T4, operator5: (target: This & T1 & T2 & T3 & T4) => T5, operator6: (target: This & T1 & T2 & T3 & T4 & T5) => T6, operator7: (target: This & T1 & T2 & T3 & T4 & T5 & T6) => T7, operator8: (target: This & T1 & T2 & T3 & T4 & T5 & T6 & T7) => T8, operator9: (target: This & T1 & T2 & T3 & T4 & T5 & T6 & T7 & T8) => T9, operator10: (target: This & T1 & T2 & T3 & T4 & T5 & T6 & T7 & T8 & T9) => T10): This & Shallow<T1 & T2 & T3 & T4 & T5 & T6 & T7 & T8 & T9 & T10>
-}
 
 export interface Newable<ReturnType> {
   new (...args: any[]): ReturnType;
