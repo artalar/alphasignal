@@ -37,7 +37,7 @@ export type Shallow<T> = {
 } & {}
 
 export interface Newable<ReturnType> {
-  new (...args: any[]): ReturnType;
+  new (...args: any[]): ReturnType
 }
 
 export type Values<T> = T[keyof T]
@@ -55,6 +55,21 @@ export type PickValuesKeys<T, V> = Values<{
 export type PickValues<T, V> = {
   [K in PickValuesKeys<T, V>]: T[K]
 }
+
+export type OverloadParameters<T> = T extends {
+  (...args: infer Overload1Params): any
+  (...args: infer Overload2Params): any
+  (...args: infer Overload3Params): any
+  (...args: infer Overload4Params): any
+  (...args: infer Overload5Params): any
+}
+  ?
+      | Overload1Params
+      | Overload2Params
+      | Overload3Params
+      | Overload4Params
+      | Overload5Params
+  : never
 
 /** Throws `Error(message)` if `value` is falsy */
 export function assert(
