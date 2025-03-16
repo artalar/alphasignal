@@ -1,6 +1,7 @@
-import { expect, test as viTest } from 'vitest'
+import { expect, vi, test as viTest } from 'vitest'
 
 import {
+  action,
   atom,
   clearStack,
   Frame,
@@ -13,6 +14,8 @@ import {
 import { sleep } from './utils.ts'
 import { mockFn } from './testing.ts'
 
+clearStack()
+
 // Create a properly typed wrapper around vitest's test function
 const test = Object.assign(
   (name: string, fn: () => void | Promise<void>, options?: any) =>
@@ -20,7 +23,12 @@ const test = Object.assign(
   viTest,
 ) as typeof viTest
 
-clearStack()
+let getStackTrace = (acc = '', frame = top()): string => {
+  if (acc.length > 500) throw new Error('RECURSION')
+  if (!acc) acc = ` <-- ${frame.atom.name}`
+  const cause = frame.pubs.find((pub: Frame | null) => pub && pub.atom !== root)
+  return cause ? getStackTrace(`${acc} <-- ${cause.atom.name}`, cause) : acc
+}
 
 test('linking', () => {
   const name = 'linking'
@@ -61,15 +69,6 @@ test('linking', () => {
 
 test('async frame stack', async () => {
   const name = 'asyncLoop'
-
-  let getStackTrace = (acc = '', frame = top()): string => {
-    if (acc.length > 500) throw new Error('RECURSION')
-    if (!acc) acc = ` <-- ${frame.atom.name}`
-    const cause = frame.pubs.find(
-      (pub: Frame | null) => pub && pub.atom !== root,
-    )
-    return cause ? getStackTrace(`${acc} <-- ${cause.atom.name}`, cause) : acc
-  }
 
   const a0 = atom(0, `${name}.a0`)
   const a1 = atom(() => {
@@ -221,6 +220,43 @@ test('subscribe to cached atom', () => {
   expect(a1Frame?.subs.length).toBe(1)
 })
 
+test('update propagation for atom with listener', () => {
+  const a1 = atom(0)
+  const a2 = atom(() => a1())
+  const a3 = atom(() => a2())
+
+  const cb2 = vi.fn()
+  const cb3 = vi.fn()
+
+  a2.subscribe(cb2)
+  const un3 = a3.subscribe(cb3)
+
+  expect(cb2.mock.calls.length).toBe(1)
+  expect(cb3.mock.calls.length).toBe(1)
+
+  a1(1)
+  notify()
+
+  expect(cb2.mock.calls.length).toBe(2)
+  expect(cb2.mock.calls[1]?.[0]).toBe(1)
+  expect(cb3.mock.calls.length).toBe(2)
+  expect(cb3.mock.calls[1]?.[0]).toBe(1)
+
+  un3()
+  expect(root().state.store.get(a2)!.subs.length).toBe(1)
+  expect(root().state.store.get(a3)!.subs.length).toBe(0)
+  a1(2)
+  notify()
+  expect(cb2.mock.calls.length).toBe(3)
+  expect(cb2.mock.calls[2]?.[0]).toBe(2)
+
+  a3.subscribe(cb3)
+  expect(root().state.store.get(a2)!.subs.length).toBe(2)
+
+  atom(() => a3()).subscribe()
+  expect(root().state.store.get(a2)!.subs.length).toBe(2)
+})
+
 test('conditional deps duplication', () => {
   const name = 'conditionalDeps'
   const condition = atom(true, `${name}.condition`)
@@ -296,6 +332,28 @@ test('computed without dependencies', () => {
   // TODO remove ability to write a computed (replace with Atom + withComputed)
   // @ts-ignore
   expect(a(10)).toBe(11)
+})
+
+test('action', () => {
+  const testAction = action((...params: any[]) => params, 'testAction')
+  expect(testAction(1, 2, 3)).toEqual([1, 2, 3])
+})
+
+test('action cause stack', () => {
+  const a1 = atom(0, 'a1')
+  const a2 = atom(() => a1(), 'a2')
+  const act = action((number: number) => a1(number), 'act')
+
+  let log
+  atom(() => {
+    a2()
+    log = getStackTrace()
+  }, 'log').subscribe()
+
+  act(1)
+  notify()
+
+  expect(log).toBe(' <-- log <-- a2 <-- a1 <-- act')
 })
 
 // test.skip('action', () => {

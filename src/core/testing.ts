@@ -1,6 +1,6 @@
 
 export function mockFn<I extends any[], O>(
-  fn: (...input: I) => O = (...i: any) => void 0 as any,
+  fn: (...input: I) => O = () => void 0 as any,
 ) {
   const _fn = Object.assign(
     function (...i: I) {

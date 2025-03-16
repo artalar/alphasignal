@@ -1,6 +1,14 @@
-import { expectTypeOf, test } from 'vitest'
+import { expect, expectTypeOf, test } from 'vitest'
 
-import { Action, Assigner, Atom, atom, AtomLike, Middleware } from './atom.js'
+import {
+  Action,
+  Assigner,
+  Atom,
+  atom,
+  AtomLike,
+  isAction,
+  Middleware,
+} from './atom.js'
 
 // Simple extension for testing
 const withProp =
@@ -40,11 +48,19 @@ test('7 assigner extensions', () => {
 })
 
 test('bind assigned functions', () => {
-  const number = atom(0).mix((target) => ({
+  const number = atom(0, 'number').mix((target) => ({
     inc: (to = 1) => target(target() + to),
   }))
 
   expectTypeOf(number.inc).toExtend<Action<[number?], number>>()
+
+  expect(typeof number.inc).toBe('function')
+  expect(number.inc.__reatom[0]?.name).toBe('actionComputed')
+  expect(isAction(number.inc)).toBeTruthy()
+  expect(number.inc.name).toBe('number.inc')
+  expect(number.inc()).toBe(1)
+  expect(number.inc(10)).toBe(11)
+  expect(number()).toBe(11)
 })
 
 export function withInput<Params extends any[], T>(
@@ -67,18 +83,18 @@ test('input payload change', () => {
   )
   const n3 = atom('').mix(withInput((value: number) => String(value)))
 
-  n1()
-  n1(1)
+  expect(n1()).toBe('')
+  expect(n1(1)).toBe('1')
   // @ts-expect-error
-  n1('1')
-  n2()
-  n2(2)
+  ;() => n1('1')
+  expect(n2()).toBe('')
+  expect(n2(2)).toBe('2')
   // @ts-expect-error
-  n2('2')
-  n3()
-  n3(3)
+  ;() => n2('2')
+  expect(n3()).toBe('')
+  expect(n3(3)).toBe('3')
   // @ts-expect-error
-  n3('3')
+  ;() => n3('3')
 
   expectTypeOf(n1).toExtend<Atom<string>>()
   expectTypeOf(n2).toExtend<AtomLike<string> & ((value?: number) => string)>()

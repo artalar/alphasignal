@@ -1,5 +1,5 @@
 import type { Fn, Unsubscribe } from './utils.ts'
-import { assert } from './utils.js'
+import { assert, noop } from './utils.js'
 import type { Mix } from './mix.ts'
 
 import { COLOR } from '../picocolors.js'
@@ -13,7 +13,7 @@ export interface AtomLike<State = any> {
   /** Extension system */
   mix: Mix<this>
 
-  subscribe: (cb?: () => any) => Unsubscribe
+  subscribe: (cb?: (state: State) => any) => Unsubscribe
 
   /** @internal The list of applied mixins (middlewares). */
   __reatom: Array<Fn>
@@ -34,7 +34,9 @@ export interface TemporalArray<T = any> extends Array<T> {}
 
 /** Logic container with atom features */
 export interface Action<Params extends any[] = any[], Payload = any>
-  extends AtomLike<TemporalArray<{ params: Params; payload: Payload }>> {
+  extends AtomLike /* <TemporalArray<{ params: Params; payload: Payload }>> */ {
+  // TODO
+  // (): never
   (...a: Params): Payload
 }
 
@@ -46,11 +48,13 @@ export interface Frame<State = any> {
   /** Immutable list of dependencies.
    * The first element is actualization flag and an imperative write cause. */
   pubs: [actualization: null | Frame, ...dependencies: Array<Frame>]
-  subs: Array<AtomLike>
+  subs: Array<Fn | AtomLike>
   run<I extends any[], O>(fn: (...args: I) => O, ...args: I): O
 }
 
-export type AtomState<T extends AtomLike> = T extends AtomLike<infer State> ? State : never
+export type AtomState<T extends AtomLike> = T extends AtomLike<infer State>
+  ? State
+  : never
 
 /** Computed's derivations queue */
 export interface Queue extends Array<Fn> {}
@@ -124,14 +128,14 @@ let enqueue = (rootFrame: RootFrame, frame: Frame) => {
 
   for (let i = 0; i < frame.subs.length; i++) {
     let sub = frame.subs[i]!
-    if (frame.atom === sub) {
-      if (rootFrame.state.queue.push(sub) === 1) {
-        Promise.resolve().then(() => notify(rootFrame))
-      }
-    } else {
+    if ('__reatom' in sub) {
       let subFrame = rootFrame.state.store.get(sub)!
       if (subFrame.pubs[0] !== null) {
         enqueue(rootFrame, copy(rootFrame, subFrame))
+      }
+    } else {
+      if (rootFrame.state.queue.push(sub) === 1) {
+        Promise.resolve().then(() => notify(rootFrame))
       }
     }
   }
@@ -166,7 +170,7 @@ let link = (frame: Frame) => {
 // but in the real data, it is in the best case quite often (pub.subs.pop()).
 // For example, as we run `link` before `unlink` during deps invalidation,
 // for deps duplication we want to find just added dep.
-let unlink = (sub: Atom, oldPubs: Frame['pubs']) => {
+let unlink = (sub: Atom | Fn, oldPubs: Frame['pubs']) => {
   if (DEBUG) {
     console.log(COLOR.red('unlink'), sub.name)
   }
@@ -231,20 +235,45 @@ let castAtom = <T extends AtomLike>(
   Reflect.defineProperty(target, 'name', { value: name })
   target.toString = () => `[Atom ${name}]`
   ;(target as AtomLike).__reatom = []
-  // FIXME implement
-  ;(target as AtomLike).mix = (target: T) => target
-  ;(target as AtomLike).subscribe = () => {
+  // @ts-ignore
+  ;(target as AtomLike).mix = (...extensions) =>
+    extensions.reduce((target, ext): AtomLike => {
+      let result = ext(target)
+      if (typeof result === 'function') {
+        target.__reatom.push(result)
+      } else {
+        for (let key in result) {
+          assert(
+            !(key in target),
+            `Key ${key} already exist in atom ${target.name}`,
+          )
+          // @ts-expect-error
+          target[key] =
+            typeof result[key] === 'function'
+              ? action(result[key] as Fn, `${target.name}.${key}`)
+              : result[key]
+        }
+      }
+      return target
+    }, target as AtomLike)
+  ;(target as AtomLike).subscribe = (userCb = noop) => {
     if (DEBUG) {
       console.log('subscribe', target.name)
     }
 
     let rootFrame = root()
 
-    target()
+    let lastState = {}
+    let cb = () => {
+      if (!Object.is(lastState, (lastState = target()))) {
+        userCb(lastState)
+      }
+    }
+    cb()
 
     let frame = rootFrame.state.store.get(target as Atom)
 
-    if (frame!.subs.push(target as Atom) === 1) {
+    if (frame!.subs.push(cb) === 1) {
       relink(frame!, [null])
     }
 
@@ -255,10 +284,11 @@ let castAtom = <T extends AtomLike>(
 
       if (!frame) return
 
-      frame.subs.splice(frame.subs.indexOf(target as Atom), 1)
+      // TODO optimize
+      frame.subs.splice(frame.subs.indexOf(cb), 1)
 
       if (frame.subs.length === 0) {
-        unlink(target as Atom, rootFrame.state.store.get(target as Atom)!.pubs)
+        unlink(target, rootFrame.state.store.get(target as Atom)!.pubs)
       }
 
       frame = undefined
@@ -276,12 +306,8 @@ export let atom: {
     let rootFrame = root()
     let topFrame = top()
     let push = arguments.length !== 0
-    let frame = rootFrame.state.store.get(atom)
+    let frame = rootFrame.state.store.get(atom)! // TODO improve types handling in the computed
     let init = frame === undefined
-
-    if (DEBUG) {
-      console.log(push ? COLOR.cyan('enter') : COLOR.yellow('enter'), atom.name)
-    }
 
     if (frame === undefined) {
       frame = {
@@ -296,69 +322,92 @@ export let atom: {
     }
 
     let { error, state, pubs } = frame
-
-    if (push) {
-      frame = copy(rootFrame, frame)
-      frame.pubs[0] = topFrame
-      frame.state = arguments[0]
-      frame.error = null
-    }
-
-    let copied = push || pubs[0] === null
+    let newState = state
 
     try {
       STACK.push(frame)
 
-      if (
-        typeof setup === 'function' &&
-        (frame.pubs[0] === null || !frame.subs.length)
-      ) {
-        let shouldUpdate = init || push
-        if (!shouldUpdate) {
-          pubs = frame.pubs
-          frame.pubs = [null]
-          try {
-            for (let i = 1; i < pubs.length; i++) {
-              let { error, state, atom } = pubs[i]!
+      function computed() {
+        let push = arguments.length > 0
 
-              let pubFrame = rootFrame.state.store.get(atom)!
-              let isFresh =
-                pubFrame.subs.length &&
-                pubFrame.pubs[0] !== null &&
-                !pubFrame.error
-
-              if (isFresh) {
-                frame.pubs.push(pubFrame)
-              }
-
-              if (
-                !Object.is(state, isFresh ? pubFrame.state : atom()) ||
-                error
-              ) {
-                shouldUpdate = true
-                break
-              }
-            }
-          } finally {
-            frame.pubs = pubs
-          }
+        if (DEBUG) {
+          console.log(
+            push ? COLOR.cyan('enter') : COLOR.yellow('enter'),
+            atom.name,
+          )
         }
 
-        if (shouldUpdate) {
-          // TODO there are extra invalidations in diamond case
-          if (!copied) {
-            STACK[STACK.length - 1] = frame = copy(rootFrame, frame)
-          }
-
-          frame.pubs = [null]
-          frame.state = setup(frame.state)
+        if (push) {
+          frame = copy(rootFrame, frame)
+          frame.pubs[0] = topFrame
+          frame.state = arguments[0]
           frame.error = null
+        }
 
-          if (frame.subs.length) {
-            relink(frame, pubs)
+        let copied = push || pubs[0] === null
+
+        if (
+          typeof setup === 'function' &&
+          (frame.pubs[0] === null || !frame.subs.length)
+        ) {
+          let shouldUpdate = init || push
+          if (!shouldUpdate) {
+            pubs = frame.pubs
+            frame.pubs = [null]
+            try {
+              for (let i = 1; i < pubs.length; i++) {
+                let { error, state, atom } = pubs[i]!
+
+                let pubFrame = rootFrame.state.store.get(atom)!
+                let isFresh =
+                  pubFrame.subs.length &&
+                  pubFrame.pubs[0] !== null &&
+                  !pubFrame.error
+
+                if (isFresh) {
+                  frame.pubs.push(pubFrame)
+                }
+
+                if (
+                  !Object.is(state, isFresh ? pubFrame.state : atom()) ||
+                  error
+                ) {
+                  shouldUpdate = true
+                  break
+                }
+              }
+            } finally {
+              frame.pubs = pubs
+            }
+          }
+
+          if (shouldUpdate) {
+            // TODO there are extra invalidations in diamond case
+            if (!copied) {
+              STACK[STACK.length - 1] = frame = copy(rootFrame, frame)
+            }
+
+            frame.pubs = [null]
+            frame.state = setup(frame.state)
+            frame.error = null
+
+            if (frame.subs.length) {
+              // TODO may be a bug with resubscribing
+              relink(frame, pubs)
+            }
           }
         }
+
+        return frame.state
       }
+      Reflect.defineProperty(computed, 'name', { value: `${name}.computed` })
+
+      let fn = computed
+      for (let middleware of atom.__reatom) {
+        fn = middleware.bind(null, fn)
+      }
+      // @ts-expect-error
+      newState = fn.apply(null, arguments)
     } catch (error) {
       frame.error = error ?? new ReatomError('Unknown error')
     } finally {
@@ -376,7 +425,7 @@ export let atom: {
         frame.subs.length !== 0 &&
         // TODO wat?
         pubs[0] !== null &&
-        (!Object.is(state, frame.state) || error !== frame.error)
+        (!Object.is(state, newState) || error !== frame.error)
       ) {
         enqueue(rootFrame, frame)
       }
@@ -388,7 +437,7 @@ export let atom: {
       throw frame.error
     }
 
-    return frame.state
+    return newState
   }, name)
 
   if (typeof setup === 'function') {
@@ -398,41 +447,29 @@ export let atom: {
   return atom
 }
 
+// @ts-expect-error
+export let isAction: {
+  <T extends Action>(target: T): target is T
+  (target: any): target is Action
+} = (target: any) =>
+  '__reatom' in target && target.__reatom[0]?.name === 'actionComputed'
+
 // TODO support generics
 export let action = <Params extends any[] = any[], Payload = any>(
   cb: (...params: Params) => Payload,
   name = named('action'),
-): Action<Params, Payload> => {
-  // let params: Params
-  // let action = atom(
-  //   (state: Array<{ params: Params; payload: Payload }> = []) => {
-  //     try {
-  //       return [...state, { params, payload: cb(...params) }]
-  //     } finally {
-  //       // @ts-expect-error
-  //       params = undefined
-  //       top().pubs.length = 0
-  //     }
-  //   },
-  //   name,
-  // )
-  // // action.__reatom.push((next, ...a) => {
-  // //   params = a
-  // //   let state = next()
-  // //   return state[state.length - 1].payload
-  // // })
-
-  let action = atom((state: any[] = []): any => {
-    try {
-      var payload = cb(...(state as any))
-      return payload
-    } finally {
-      top().pubs.length = 1
-    }
-  }, name)
-  // @ts-expect-error
-  return (...a: Params) => action((params = a))
-}
+): Action<Params, Payload> =>
+  atom(null, name).mix(
+    () =>
+      // @ts-ignore
+      function actionComputed(_computed, ...params: Params): Payload {
+        try {
+          return cb(...params)
+        } finally {
+          top().pubs.length = 1
+        }
+      },
+  )
 
 // /** https://github.com/tc39/proposal-async-context?tab=readme-ov-file#asynccontextvariable */
 // /** Variable of async context - process specific state, coupled with callstack frame */
