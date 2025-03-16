@@ -1,6 +1,15 @@
 import { expectTypeOf, test } from 'vitest'
 
-import { Action, Assigner, Atom, atom, AtomLike } from './atom'
+import {
+  Action,
+  Assigner,
+  Atom,
+  atom,
+  AtomLike,
+  AtomState,
+  Middleware,
+} from './atom.js'
+import { Fn } from './index.js'
 
 // Simple extension for testing
 const withProp =
@@ -45,4 +54,44 @@ test('bind assigned functions', () => {
   }))
 
   expectTypeOf(number.inc).toExtend<Action<[number?], number>>()
+})
+
+export function withInput<Params extends any[], T>(
+  parse: (...parse: Params) => T,
+): Middleware<Atom<T>, Params> {
+  return () =>
+    (next, ...params) =>
+      params.length ? next(parse(...params)) : next()
+}
+
+test('input payload change', () => {
+  const n1 = atom('').mix(
+    () =>
+      (next, ...args: [] | [number]) =>
+        args.length ? next(String(args[0])) : next(),
+  )
+  const n2 = atom('').mix(
+    () => (next, value?: number) =>
+      value === undefined ? next() : next(String(value)),
+  )
+  const n3 = atom('').mix(withInput((value: number) => String(value)))
+
+  n1()
+  n1(1)
+  // @ts-expect-error
+  n1('1')
+  n2()
+  n2(2)
+  // @ts-expect-error
+  n2('2')
+  n3()
+  n3(3)
+  // @ts-expect-error
+  n3('3')
+
+  expectTypeOf(n1).toExtend<Atom<string>>()
+  expectTypeOf(n2).toExtend<AtomLike<string> & ((value?: number) => string)>()
+  expectTypeOf(n2).not.toExtend<
+    AtomLike<string> & ((value?: number) => number)
+  >()
 })

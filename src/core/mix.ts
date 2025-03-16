@@ -1,7 +1,10 @@
 import { Action, AtomLike } from './atom'
 import { OverloadParameters, Rec } from './utils'
 
-export interface Assigner<Target extends AtomLike, Result extends Rec> {
+export interface Assigner<
+  Target extends AtomLike,
+  Result extends Rec<unknown> = Rec<unknown>,
+> {
   (target: Target): Result
 }
 export type AssignerBind<T> = T extends AtomLike
@@ -10,32 +13,30 @@ export type AssignerBind<T> = T extends AtomLike
   ? Action<Params, Payload>
   : T
 
-export interface Middleware<
-  Target extends AtomLike,
-  Params extends any[] = Parameters<Target>,
-  Result = ReturnType<Target>,
-> {
+export interface Middleware<Target extends AtomLike, Params extends any[]> {
   (target: Target): (
-    next: (...params: OverloadParameters<Target>) => ReturnType<Target>,
-    ...params: [] | Params
-  ) => Result
+    next: (...params: [] | OverloadParameters<Target>) => ReturnType<Target>,
+    ...params: Params
+  ) => ReturnType<Target>
 }
 
 export type Extension<Target extends AtomLike> =
-  | Assigner<Target, Rec>
-  | Middleware<Target, any[], any>
+  | Assigner<Target>
+  | Middleware<Target, any[]>
 
 export type ExtendedAtom<
   Target extends AtomLike,
-  T extends Assigner<Target, Rec> | Middleware<Target, any[], unknown>,
-> = Middleware<Target> extends T // TODO why not `T extends Middleware` ?
+  T extends Assigner<Target> | Middleware<Target, any[]>,
+> = T extends Assigner<Target, infer Result>
+  ? Target & { [K in keyof Result]: AssignerBind<Result[K]> }
+  : T extends Middleware<Target, OverloadParameters<Target>>
   ? Target
-  : T extends Middleware<Target, infer Params, infer Result>
-  ? AtomLike<Result> & { (...params: Params): Result } & {
+  : T extends Middleware<Target, infer Params>
+  ? AtomLike<ReturnType<Target>> & {
+      (...params: Params): ReturnType<Target>
+    } & {
       [K in Exclude<keyof Target, keyof AtomLike>]: Target[K]
     }
-  : T extends Assigner<Target, infer Result>
-  ? Target & { [K in keyof Result]: AssignerBind<Result[K]> }
   : never
 
 export interface Mix<Target extends AtomLike> {

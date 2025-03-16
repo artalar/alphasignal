@@ -1,10 +1,10 @@
 import type { Fn, Unsubscribe } from './utils.ts'
-import { assert } from './utils.ts'
+import { assert } from './utils.js'
 import type { Mix } from './mix.ts'
 
-import { COLOR } from '../picocolors.ts'
+import { COLOR } from '../picocolors.js'
 
-export * from './mix.ts'
+export * from './mix.js'
 
 /** Base atom interface for other userspace implementations */
 export interface AtomLike<State = any> {
@@ -49,6 +49,8 @@ export interface Frame<State = any> {
   subs: Array<AtomLike>
   run<I extends any[], O>(fn: (...args: I) => O, ...args: I): O
 }
+
+export type AtomState<T extends AtomLike> = T extends AtomLike<infer State> ? State : never
 
 /** Computed's derivations queue */
 export interface Queue extends Array<Fn> {}
