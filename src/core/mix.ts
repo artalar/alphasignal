@@ -7,6 +7,7 @@ export interface Assigner<
 > {
   (target: Target): Result
 }
+
 export type AssignerBind<T> = T extends AtomLike
   ? T
   : T extends (...params: infer Params) => infer Payload
@@ -24,9 +25,10 @@ export type Extension<Target extends AtomLike> =
   | Assigner<Target>
   | Middleware<Target, any[]>
 
+// Base type for handling a single extension
 export type ExtendedAtom<
   Target extends AtomLike,
-  T extends Assigner<Target> | Middleware<Target, any[]>,
+  T extends Extension<Target>,
 > = T extends Assigner<Target, infer Result>
   ? Target & { [K in keyof Result]: AssignerBind<Result[K]> }
   : T extends Middleware<Target, OverloadParameters<Target>>
@@ -39,12 +41,19 @@ export type ExtendedAtom<
     }
   : never
 
+// Type helper for applying extensions recursively
+export type ApplyExtensions<
+  Target extends AtomLike,
+  Extensions extends any[],
+> = Extensions extends []
+  ? Target
+  : Extensions extends [infer First, ...infer Rest]
+  ? First extends Extension<Target>
+    ? ApplyExtensions<ExtendedAtom<Target, First>, Rest>
+    : never
+  : never
+
+// Mix interface with a more efficient type definition
 export interface Mix<Target extends AtomLike> {
-  /* prettier-ignore */ <T1 extends Extension<Target>>(extension1: T1): ExtendedAtom<Target, T1>
-  /* prettier-ignore */ <T1 extends Extension<Target>, T2 extends Extension<ExtendedAtom<Target, T1>>, >(extension1: T1, extension2: T2): ExtendedAtom<ExtendedAtom<Target, T1>, T2>
-  /* prettier-ignore */ <T1 extends Extension<Target>, T2 extends Extension<ExtendedAtom<Target, T1>>, T3 extends Extension<ExtendedAtom<ExtendedAtom<Target, T1>, T2>>>(extension1: T1, extension2: T2, extension3: T3): ExtendedAtom<ExtendedAtom<ExtendedAtom<Target, T1>, T2>, T3>
-  /* prettier-ignore */ <T1 extends Extension<Target>, T2 extends Extension<ExtendedAtom<Target, T1>>, T3 extends Extension<ExtendedAtom<ExtendedAtom<Target, T1>, T2>>, T4 extends Extension<ExtendedAtom<ExtendedAtom<ExtendedAtom<Target, T1>, T2>, T3>>>(extension1: T1, extension2: T2, extension3: T3, extension4: T4): ExtendedAtom<ExtendedAtom<ExtendedAtom<ExtendedAtom<Target, T1>, T2>, T3>, T4>
-  /* prettier-ignore */ <T1 extends Extension<Target>, T2 extends Extension<ExtendedAtom<Target, T1>>, T3 extends Extension<ExtendedAtom<ExtendedAtom<Target, T1>, T2>>, T4 extends Extension<ExtendedAtom<ExtendedAtom<ExtendedAtom<Target, T1>, T2>, T3>>, T5 extends Extension<ExtendedAtom<ExtendedAtom<ExtendedAtom<ExtendedAtom<Target, T1>, T2>, T3>, T4>>>(extension1: T1, extension2: T2, extension3: T3, extension4: T4, extension5: T5): ExtendedAtom<ExtendedAtom<ExtendedAtom<ExtendedAtom<ExtendedAtom<Target, T1>, T2>, T3>, T4>, T5>
-  /* prettier-ignore */ <T1 extends Extension<Target>, T2 extends Extension<ExtendedAtom<Target, T1>>, T3 extends Extension<ExtendedAtom<ExtendedAtom<Target, T1>, T2>>, T4 extends Extension<ExtendedAtom<ExtendedAtom<ExtendedAtom<Target, T1>, T2>, T3>>, T5 extends Extension<ExtendedAtom<ExtendedAtom<ExtendedAtom<ExtendedAtom<Target, T1>, T2>, T3>, T4>>, T6 extends Extension<ExtendedAtom<ExtendedAtom<ExtendedAtom<ExtendedAtom<ExtendedAtom<Target, T1>, T2>, T3>, T4>, T5>>>(extension1: T1, extension2: T2, extension3: T3, extension4: T4, extension5: T5, extension6: T6): ExtendedAtom<ExtendedAtom<ExtendedAtom<ExtendedAtom<ExtendedAtom<ExtendedAtom<Target, T1>, T2>, T3>, T4>, T5>, T6>
-  /* prettier-ignore */ <T1 extends Extension<Target>, T2 extends Extension<ExtendedAtom<Target, T1>>, T3 extends Extension<ExtendedAtom<ExtendedAtom<Target, T1>, T2>>, T4 extends Extension<ExtendedAtom<ExtendedAtom<ExtendedAtom<Target, T1>, T2>, T3>>, T5 extends Extension<ExtendedAtom<ExtendedAtom<ExtendedAtom<ExtendedAtom<Target, T1>, T2>, T3>, T4>>, T6 extends Extension<ExtendedAtom<ExtendedAtom<ExtendedAtom<ExtendedAtom<ExtendedAtom<Target, T1>, T2>, T3>, T4>, T5>>, T7 extends Extension<ExtendedAtom<ExtendedAtom<ExtendedAtom<ExtendedAtom<ExtendedAtom<ExtendedAtom<Target, T1>, T2>, T3>, T4>, T5>, T6>>>(extension1: T1, extension2: T2, extension3: T3, extension4: T4, extension5: T5, extension6: T6, extension7: T7): ExtendedAtom<ExtendedAtom<ExtendedAtom<ExtendedAtom<ExtendedAtom<ExtendedAtom<ExtendedAtom<Target, T1>, T2>, T3>, T4>, T5>, T6>, T7>
+  <E extends Extension<Target>[]>(...extensions: E): ApplyExtensions<Target, E>
 }

@@ -1,15 +1,6 @@
 import { expectTypeOf, test } from 'vitest'
 
-import {
-  Action,
-  Assigner,
-  Atom,
-  atom,
-  AtomLike,
-  AtomState,
-  Middleware,
-} from './atom.js'
-import { Fn } from './index.js'
+import { Action, Assigner, Atom, atom, AtomLike, Middleware } from './atom.js'
 
 // Simple extension for testing
 const withProp =
