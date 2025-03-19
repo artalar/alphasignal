@@ -8,6 +8,7 @@ import {
   isConnected,
   notify,
   root,
+  suspense,
   top,
   wrap,
 } from './atom.ts'
@@ -23,7 +24,7 @@ const test = Object.assign(
   viTest,
 ) as typeof viTest
 
-let getStackTrace = (acc = '', frame = top()): string => {
+const getStackTrace = (acc = '', frame = top()): string => {
   if (acc.length > 500) throw new Error('RECURSION')
   if (!acc) acc = ` <-- ${frame.atom.name}`
   const cause = frame.pubs.find((pub: Frame | null) => pub && pub.atom !== root)
@@ -356,34 +357,58 @@ test('action cause stack', () => {
   expect(log).toBe(' <-- log <-- a2 <-- a1 <-- act')
 })
 
-// test.skip('action', () => {
-//   const act1 = action(noop)
-//   const act2 = action(noop)
-//   const fn = mockFn()
-//   const a1 = atom(0)
-//   const a2 = atom((ctx) => {
-//     1 //?
-//     a1()
-//     act1().forEach(() => fn(1))
-//     act2().forEach(() => fn(2))
-//   })
+test('error tracking', () => {
+  const name = 'errorTracking'
+  const a = atom(0, `${name}.a`)
+  const b = atom(() => {
+    const aState = a()
+    if (aState < 5) throw new Error('error')
+    success = true
+    return a()
+  }, `${name}.b`)
+  atom(() => {
+    try {
+      b()
+    } catch {
+      // nothing
+    }
+  }, `${name}.effect`).subscribe()
+  let success = false
 
-//   effect(a2)()
-//   assert.is(fn.calls.length, 0)
+  expect(isConnected(b)).toBe(true)
+  expect(() => b()).toThrow()
 
-//   act1()
-//   assert.is(fn.calls.length, 1)
+  a(1)
+  notify()
+  expect(() => b()).toThrow()
 
-//   act1(ctx)
-//   assert.is(fn.calls.length, 2)
+  a(10)
+  notify()
+  expect(success).toBe(true)
+  expect(b()).toBe(10)
+})
 
-//   act2(ctx)
-//   assert.is(fn.calls.length, 3)
-//   assert.equal(
-//     fn.calls.map(({ i }) => i[0]),
-//     [1, 1, 2],
-//   )
+test('suspense', async () => {
+  const name = 'suspense'
+  const params = atom(0, `${name}.params`)
+  const data = atom(async () => params(), `${name}.data`)
+  const result = atom(() => suspense(data), `${name}.result`)
+  const track = vi.fn()
 
-//   a1(ctx, (s) => s + 1)
-//   assert.is(fn.calls.length, 3)
-// })
+  atom(() => {
+    try {
+      track(result())
+    } catch (error) {}
+  }, `${name}.effect`).subscribe()
+
+  expect(track).toBeCalledTimes(0)
+  expect(isConnected(result)).toBe(true)
+  expect(isConnected(data)).toBe(true)
+  // @ts-expect-error
+  expect(isConnected(data.suspended)).toBe(true)
+
+  await wrap(sleep())
+
+  expect(track).toBeCalledTimes(1)
+  expect(track).toBeCalledWith(0)
+})

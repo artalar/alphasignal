@@ -1,6 +1,6 @@
 import type { Fn, Unsubscribe } from './utils.ts'
 import { assert, noop } from './utils.js'
-import type { Mix } from './mix.ts'
+import type { Assigner, Extension, Mix } from './mix.ts'
 
 import { COLOR } from '../picocolors.js'
 
@@ -227,6 +227,71 @@ export let isConnected = (anAtom: Atom): boolean =>
 let i = 0
 export let named = (name: string | TemplateStringsArray) => `${name}#${++i}`
 
+let mix = (target: AtomLike, ext: Extension<AtomLike>): AtomLike => {
+  let result = ext(target)
+  if (typeof result === 'function') {
+    target.__reatom.push(result)
+  } else {
+    for (let key in result) {
+      assert(
+        !(key in target),
+        `Key ${key} already exist in atom ${target.name}`,
+      )
+      let value = result[key]
+      // @ts-expect-error
+      target[key] =
+        typeof value === 'function' && !('__reatom' in value)
+          ? action(value as Fn, `${target.name}.${key}`)
+          : value
+    }
+  }
+  return target
+}
+
+function subscribe(this: AtomLike, userCb = noop) {
+  if (DEBUG) {
+    console.log('subscribe', this.name)
+  }
+
+  let rootFrame = root()
+
+  let lastState = {}
+  let cb = () => {
+    try {
+      if (!Object.is(lastState, (lastState = this()))) {
+        userCb(lastState)
+      }
+    } catch (error) {
+      // do not allow to subscribe for error state
+      if (!frame) throw error
+    }
+  }
+  cb()
+
+  var frame = rootFrame.state.store.get(this)
+
+  if (frame!.subs.push(cb) === 1) {
+    relink(frame!, [null])
+  }
+
+  return () => {
+    if (DEBUG) {
+      console.log('unsubscribe', this.name)
+    }
+
+    if (!frame) return
+
+    // TODO optimize
+    frame.subs.splice(frame.subs.indexOf(cb), 1)
+
+    if (frame.subs.length === 0) {
+      unlink(this, rootFrame.state.store.get(this as Atom)!.pubs)
+    }
+
+    frame = undefined
+  }
+}
+
 let castAtom = <T extends AtomLike>(
   target: Fn,
   name: string,
@@ -237,63 +302,8 @@ let castAtom = <T extends AtomLike>(
   ;(target as AtomLike).__reatom = []
   // @ts-ignore
   ;(target as AtomLike).mix = (...extensions) =>
-    extensions.reduce((target, ext): AtomLike => {
-      let result = ext(target)
-      if (typeof result === 'function') {
-        target.__reatom.push(result)
-      } else {
-        for (let key in result) {
-          assert(
-            !(key in target),
-            `Key ${key} already exist in atom ${target.name}`,
-          )
-          // @ts-expect-error
-          target[key] =
-            typeof result[key] === 'function'
-              ? action(result[key] as Fn, `${target.name}.${key}`)
-              : result[key]
-        }
-      }
-      return target
-    }, target as AtomLike)
-  ;(target as AtomLike).subscribe = (userCb = noop) => {
-    if (DEBUG) {
-      console.log('subscribe', target.name)
-    }
-
-    let rootFrame = root()
-
-    let lastState = {}
-    let cb = () => {
-      if (!Object.is(lastState, (lastState = target()))) {
-        userCb(lastState)
-      }
-    }
-    cb()
-
-    let frame = rootFrame.state.store.get(target as Atom)
-
-    if (frame!.subs.push(cb) === 1) {
-      relink(frame!, [null])
-    }
-
-    return () => {
-      if (DEBUG) {
-        console.log('unsubscribe', target.name)
-      }
-
-      if (!frame) return
-
-      // TODO optimize
-      frame.subs.splice(frame.subs.indexOf(cb), 1)
-
-      if (frame.subs.length === 0) {
-        unlink(target, rootFrame.state.store.get(target as Atom)!.pubs)
-      }
-
-      frame = undefined
-    }
-  }
+    extensions.reduce(mix, target as AtomLike)
+  ;(target as AtomLike).subscribe = subscribe.bind(target as AtomLike)
 
   return target as T
 }
@@ -321,7 +331,7 @@ export let atom: {
       rootFrame.state.store.set(atom, frame)
     }
 
-    let { error, state, pubs } = frame
+    let { error, state } = frame
     let newState = state
 
     try {
@@ -329,12 +339,10 @@ export let atom: {
 
       function computed() {
         let push = arguments.length > 0
+        let { pubs } = frame
 
         if (DEBUG) {
-          console.log(
-            push ? COLOR.cyan('enter') : COLOR.yellow('enter'),
-            atom.name,
-          )
+          console.log((push ? COLOR.cyan : COLOR.yellow)('enter'), atom.name)
         }
 
         if (push) {
@@ -348,7 +356,7 @@ export let atom: {
 
         if (
           typeof setup === 'function' &&
-          (frame.pubs[0] === null || !frame.subs.length)
+          (pubs[0] === null || !frame.subs.length)
         ) {
           let shouldUpdate = init || push
           if (!shouldUpdate) {
@@ -406,9 +414,13 @@ export let atom: {
       for (let middleware of atom.__reatom) {
         fn = middleware.bind(null, fn)
       }
+      // TODO why not `frame.state = fn.apply(null, arguments)`
       // @ts-expect-error
       newState = fn.apply(null, arguments)
     } catch (error) {
+      if (DEBUG) {
+        console.log(COLOR.red('error'), atom.name)
+      }
       frame.error = error ?? new ReatomError('Unknown error')
     } finally {
       frame.pubs[0] ??= push ? topFrame : rootFrame
@@ -423,8 +435,6 @@ export let atom: {
 
       if (
         frame.subs.length !== 0 &&
-        // TODO wat?
-        pubs[0] !== null &&
         (!Object.is(state, newState) || error !== frame.error)
       ) {
         enqueue(rootFrame, frame)
@@ -531,7 +541,7 @@ export let STACK: Array<Frame> = []
 
 STACK.push(root.start(() => root()))
 
-export function clearStack() {
+export let clearStack = () => {
   STACK.length = 0
 }
 
@@ -542,7 +552,10 @@ export let top = (): Frame => {
   return STACK[STACK.length - 1]!
 }
 
-export function wrap<T extends Promise<any> | Fn>(target: T, frame = top()): T {
+export let wrap = <T extends Promise<any> | Fn>(
+  target: T,
+  frame = top(),
+): T => {
   let rootFrame = root()
 
   if (typeof target === 'function') {
@@ -583,3 +596,93 @@ export function wrap<T extends Promise<any> | Fn>(target: T, frame = top()): T {
     Promise.resolve().then(() => (STACK.length -= 2))
   }) as T
 }
+
+let SETTLED = new WeakMap<
+  Promise<any>,
+  { kind: 'pending' | 'fulfilled' | 'rejected'; value: any }
+>()
+export let settled = <Result, Fallback = undefined>(
+  promise: Promise<Result>,
+  fallback?: Fallback,
+): Result | Fallback => {
+  assert(promise instanceof Promise, 'promise expected', ReatomError)
+
+  let settled = SETTLED.get(promise)
+  if (!settled) {
+    SETTLED.set(promise, (settled = { kind: 'pending', value: undefined }))
+    promise
+      .then((value) => {
+        SETTLED.set(promise, { kind: 'fulfilled', value })
+      })
+      .catch((error) => {
+        SETTLED.set(promise, { kind: 'rejected', value: error })
+      })
+  }
+
+  if (settled.kind === 'fulfilled') {
+    return settled.value
+  }
+
+  if (settled.kind === 'rejected') {
+    throw settled.value
+  }
+
+  // if (arguments.length === 2) {
+  //   return fallback as T
+  // } else {
+  //   throw promise
+  // }
+  return fallback as Fallback
+}
+
+export type WithSuspend<T extends AtomLike> = T & {
+  suspended: Computed<Awaited<AtomState<T>>>
+}
+export let withSuspend =
+  <T extends AtomLike>(): Assigner<
+    T,
+    { suspended: Computed<Awaited<AtomState<T>>> }
+  > =>
+  (target) => {
+    if ('suspended' in target) return {} as any
+
+    let suspended = atom(() => {
+      let promise = target()
+
+      if (promise instanceof Promise === false) return promise
+
+      let result = settled(promise, promise)
+      if (result === promise) {
+        let resolver = wrap(() => {
+          if (DEBUG) {
+            console.log(COLOR.magenta('resolved'), suspended.name)
+          }
+          // @ts-expect-error
+          suspended({})
+        })
+        promise.then(resolver).catch(resolver)
+        throw promise
+      }
+      return result
+    }, `${target.name}.suspended`).mix(() => (next, ...a) => {
+      if (a.length) {
+        let frame = top()
+        let { pubs } = frame
+        frame.pubs = [null]
+        try {
+          // @ts-expect-error
+          return next(frame.state)
+        } finally {
+          frame.pubs = pubs
+        }
+      }
+      return next()
+    })
+
+    return { suspended }
+  }
+
+export let suspense = <T>(
+  target: AtomLike<T>,
+  // preserve = false,
+): Awaited<T> => target.mix(withSuspend()).suspended()
